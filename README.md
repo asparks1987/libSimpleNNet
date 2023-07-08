@@ -8,21 +8,6 @@ Before running the script, make sure to install the necessary Python libraries:
 
 ```bash
 pip install pandas numpy scikit-learn keras tensorflow
-
-Sure, here it is as a markdown text:
-
-markdown
-Copy code
-# Time Series Prediction with LSTM
-
-This script uses a Long Short-Term Memory (LSTM) model to predict future values in a time series. It demonstrates the complete machine learning workflow including data loading, preprocessing, model creation, training, evaluation, prediction, and model persistence.
-
-## Installation
-
-Before running the script, make sure to install the necessary Python libraries:
-
-```bash
-pip install pandas numpy scikit-learn keras tensorflow
 Script Usage
 Data Format
 This script requires a CSV file as input. The CSV file should include a date and time column, as well as a column for the target variable to predict. The remaining columns are considered as features.
