@@ -6,8 +6,9 @@ This script uses a Long Short-Term Memory (LSTM) model to predict future values 
 
 Before running the script, make sure to install the necessary Python libraries:
 
-```bash
+
 pip install pandas numpy scikit-learn keras tensorflow
+
 Script Usage
 Data Format
 This script requires a CSV file as input. The CSV file should include a date and time column, as well as a column for the target variable to predict. The remaining columns are considered as features.
