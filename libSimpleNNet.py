@@ -1,124 +1,138 @@
-from keras.models import Sequential
-from keras.layers import LSTM, Dense
-from sklearn.preprocessing import MinMaxScaler
-import pandas as pd
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.callbacks import Callback
 import numpy as np
-import socket
-from threading import Thread
-import traceback
+
+def preprocess_data(df, target_col):
+    """
+    Preprocess data, converting string inputs to numpy arrays and encoding categorical target labels.
+
+    Args:
+        df: DataFrame containing the input and target data.
+        target_col: Column name of the target data in the dataframe.
+
+    Returns:
+        X: Numpy array of input data.
+        y: Numpy array of target data.
+    """
+    # Check if input data is already numpy array, if not convert string to numpy array
+    if not isinstance(df['input'][0], np.ndarray):
+        df['input'] = df['input'].apply(lambda x: np.array([float(i) for i in x.split(",")]))
+    
+    # Label encode the target column
+    encoder = LabelEncoder()
+    df[target_col] = encoder.fit_transform(df[target_col])
+
+    # Convert input and target data to numpy arrays
+    X = np.stack(df.drop(target_col, axis=1)['input'].values)
+    y = df[target_col].values
+    return X, y
+
+def preprocess_data_array(input_array):
+    """
+    Convert input array to numpy array if it is not.
+
+    Args:
+        input_array: Input data array.
+
+    Returns:
+        numpy array of input data.
+    """
+    # If input data is not numpy array, convert it
+    if not isinstance(input_array, np.ndarray):
+        input_array = np.array([float(x) for x in input_array.split(",")])
+    return input_array
 
 def create_model(input_shape):
+    """
+    Creates LSTM model with given input shape.
+
+    Args:
+        input_shape: Shape of the input data.
+
+    Returns:
+        Created LSTM model.
+    """
     model = Sequential()
     model.add(LSTM(50, activation='relu', input_shape=input_shape))
     model.add(Dense(1))
     model.compile(optimizer='adam', loss='mse')
     return model
 
-def preprocess_data(df, target_col):
-    df['input'] = df['input'].apply(lambda x: [float(i) for i in x.split(',')])
-    input_df = pd.DataFrame(df['input'].to_list(), columns=[f'input_{i}' for i in range(len(df['input'][0]))])
-    df = pd.concat([input_df, df.drop('input', axis=1)], axis=1)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df['timestamp'] = (df['timestamp'] - df['timestamp'].min()) / np.timedelta64(1, 'D')
-    X = df.drop(target_col, axis=1)
-    y = df[target_col]
-    scaler = MinMaxScaler(feature_range=(-1, 1))
-    X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
-    return X, y
+def train_model(X, y, callback=None, epochs=1):
+    """
+    Trains the LSTM model with given training data.
 
-def train_model(X_train, y_train, callback=None, epochs=5, validation_split=0.5):
-    X_train_values = X_train.values.reshape((X_train.shape[0], X_train.shape[1], 1))
-    model = create_model((X_train.shape[1], 1))
-    callbacks = [callback] if callback else []
-    history = model.fit(X_train_values, y_train, epochs=epochs, validation_split=validation_split, callbacks=callbacks)
+    Args:
+        X: Input data.
+        y: Target data.
+        callback: Keras callback for updating progress.
+        epochs: Number of training epochs.
+
+    Returns:
+        Trained model and history of the training.
+    """
+    # Check if input data is 1D, if so reshape it to 2D as LSTM expects input data to be 3D (batch_size, timesteps, features)
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # LSTM expects input data to be 3D (batch_size, timesteps, features)
+    # If input data is 2D, reshape it to 3D
+    if len(X_train.shape) == 2:
+        X_train = X_train.reshape((X_train.shape[0], X_train.shape[1], 1))
+    if len(X_test.shape) == 2:
+        X_test = X_test.reshape((X_test.shape[0], X_test.shape[1], 1))
+
+    model = create_model((X_train.shape[1], X_train.shape[2]))
+
+    # Fit the model and capture the history
+    history = model.fit(X_train, y_train, epochs=epochs, verbose=0, validation_data=(X_test, y_test), callbacks=[callback])
     return model, history
 
-class ServerThread(Thread):
-    def __init__(self, port, model):
+def save_model(model, file_path):
+    """
+    Saves the model to a file.
+
+    Args:
+        model: Trained model.
+        file_path: File path to save the model.
+    """
+    model.save(file_path)
+
+def load_model_from_file(file_path):
+    """
+    Loads the model from a file.
+
+    Args:
+        file_path: File path to load the model from.
+
+    Returns:
+        Loaded model.
+    """
+    return load_model(file_path)
+
+class ProgressCallback(Callback):
+    """
+    Callback class for updating the progress.
+    """
+    def __init__(self, gui):
         super().__init__()
-        self.port = port
-        self.model = model
+        self.gui = gui
 
-    def run(self):
-        s = socket.socket()
-        s.bind(("", self.port))
-        s.listen(1)
-        print(f"Server started on port {self.port}. Waiting for connections...")
-        while True:
-            conn, addr = s.accept()
-            print(f"Handshake achieved with {addr}")
-            try:
-                while True:
-                    input_str = conn.recv(1024).decode('utf-8')
-                    if not input_str:
-                        break
-                    input_list = [float(x) for x in input_str.split(',')]
-                    output = self.model.predict([input_list])
-                    conn.sendall(str(output[0][0]).encode('utf-8'))
-            except Exception as e:
-                print(f"Exception occurred: {e}")
-                print(traceback.format_exc())
-            finally:
-                conn.close()
-from keras.models import Sequential
-from keras.layers import LSTM, Dense
-from sklearn.preprocessing import MinMaxScaler
-import pandas as pd
-import numpy as np
-import socket
-from threading import Thread
-import traceback
+    def on_epoch_end(self, epoch, logs=None):
+        """
+        Updates the progress at the end of each epoch.
 
-def create_model(input_shape):
-    model = Sequential()
-    model.add(LSTM(50, activation='relu', input_shape=input_shape))
-    model.add(Dense(1))
-    model.compile(optimizer='adam', loss='mse')
-    return model
-
-def preprocess_data(df, target_col):
-    df['input'] = df['input'].apply(lambda x: [float(i) for i in x.split(',')])
-    input_df = pd.DataFrame(df['input'].to_list(), columns=[f'input_{i}' for i in range(len(df['input'][0]))])
-    df = pd.concat([input_df, df.drop('input', axis=1)], axis=1)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df['timestamp'] = (df['timestamp'] - df['timestamp'].min()) / np.timedelta64(1, 'D')
-    X = df.drop(target_col, axis=1)
-    y = df[target_col]
-    scaler = MinMaxScaler(feature_range=(-1, 1))
-    X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
-    return X, y
-
-def train_model(X_train, y_train, callback=None, epochs=5, validation_split=0.5):
-    X_train_values = X_train.values.reshape((X_train.shape[0], X_train.shape[1], 1))
-    model = create_model((X_train.shape[1], 1))
-    callbacks = [callback] if callback else []
-    history = model.fit(X_train_values, y_train, epochs=epochs, validation_split=validation_split, callbacks=callbacks)
-    return model, history
-
-class ServerThread(Thread):
-    def __init__(self, port, model):
-        super().__init__()
-        self.port = port
-        self.model = model
-
-    def run(self):
-        s = socket.socket()
-        s.bind(("", self.port))
-        s.listen(1)
-        print(f"Server started on port {self.port}. Waiting for connections...")
-        while True:
-            conn, addr = s.accept()
-            print(f"Handshake achieved with {addr}")
-            try:
-                while True:
-                    input_str = conn.recv(1024).decode('utf-8')
-                    if not input_str:
-                        break
-                    input_list = [float(x) for x in input_str.split(',')]
-                    output = self.model.predict([input_list])
-                    conn.sendall(str(output[0][0]).encode('utf-8'))
-            except Exception as e:
-                print(f"Exception occurred: {e}")
-                print(traceback.format_exc())
-            finally:
-                conn.close()
+        Args:
+            epoch: The current epoch number.
+            logs: Dict. Currently no data is passed to this argument for this method but that may change in the future.
+        """
+        loss = logs.get('loss')
+        self.gui.losses.append(loss)  # Append the loss to gui's losses attribute
+        self.gui.update_loss_plot(self.gui.losses, epoch)
+        self.gui.update_progress((epoch + 1) / int(self.gui.epoch_spinbox.get()) * 100)
